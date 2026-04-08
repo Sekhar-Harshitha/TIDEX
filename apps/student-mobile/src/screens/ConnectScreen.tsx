@@ -132,7 +132,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: 'bold', color: '#0f172a' },
   card: { backgroundColor: '#fff', padding: 20, borderRadius: 25, elevation: 2 },
   row: { flexDirection: 'row', alignItems: 'center' },
-  iconBox: { p: 10, backgroundColor: '#eef2ff', borderRadius: 15, padding: 12 },
+  iconBox: { backgroundColor: '#eef2ff', borderRadius: 15, padding: 12 },
   info: { flex: 1, marginLeft: 15 },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a' },
   cardSub: { fontSize: 12, color: '#64748b' },

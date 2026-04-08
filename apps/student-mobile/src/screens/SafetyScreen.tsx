@@ -50,7 +50,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 14, fontWeight: 'bold', color: '#0f172a' },
   emergencyCard: { backgroundColor: '#fff', padding: 25, borderRadius: 25, marginTop: 30, elevation: 2 },
   emergencyTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', marginBottom: 20 },
-  contactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', pb: 10 },
+  contactRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingBottom: 10 },
   contactLabel: { color: '#64748b', fontSize: 14 },
   contactValue: { color: '#ef4444', fontWeight: 'bold', fontSize: 16 }
 });
