@@ -1,6 +1,6 @@
 # Real Android SOS BLE Mesh Setup
 
-This project originally had Expo-only mock connectivity. The files under `mobile/android/app/src/main/java/com/tidex/mobile/mesh` implement a real Android BLE + GPS SOS mesh flow.
+This project originally had Expo-only mock connectivity. The files under `apps/student-mobile/android/app/src/main/java/com/tidex/mobile/mesh` implement a real Android BLE + GPS SOS mesh flow.
 
 ## What Is Implemented
 
@@ -39,7 +39,7 @@ This project originally had Expo-only mock connectivity. The files under `mobile
 Because this repo currently does not contain a full generated Android app shell (`MainApplication`, Gradle files), complete these integration steps after creating native Android folders with Expo prebuild or in your existing native host app.
 
 1. Generate native Android host (if missing):
-- From `mobile/`, run Expo prebuild for Android.
+- From `apps/student-mobile/`, run Expo prebuild for Android.
 
 2. Register `MeshPackage` in your Android application class:
 - Add `MeshPackage()` to the package list in `MainApplication`.
@@ -59,9 +59,9 @@ Because this repo currently does not contain a full generated Android app shell 
 
 ## JavaScript Bridge Usage
 
-- `mobile/src/services/meshNative.ts`
-- `mobile/src/services/authSession.ts`
-- `mobile/src/screens/ConnectScreen.tsx`
+- `apps/student-mobile/src/services/meshNative.ts`
+- `apps/student-mobile/src/services/authSession.ts`
+- `apps/student-mobile/src/screens/ConnectScreen.tsx`
 
 Flow:
 1. Request runtime permissions.
