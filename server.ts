@@ -32,7 +32,8 @@ const pool = process.env.DATABASE_URL ? new Pool({
 const mockDb = {
   users: [] as any[],
   reports: [] as any[],
-  otps: [] as any[]
+  otps: [] as any[],
+  sosMessages: [] as any[]
 };
 
 // --- Auth Middleware ---
@@ -50,6 +51,14 @@ const authenticateToken = (req: any, res: any, next: any) => {
 };
 
 // --- API Routes ---
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    timestamp: Date.now(),
+    db: !!pool ? 'postgres' : 'memory'
+  });
+});
 
 // 1. Auth: Sign Up
 app.post('/api/auth/signup', async (req, res) => {
@@ -298,6 +307,84 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
+// --- SOS Mesh Ingestion ---
+app.post('/api/sos', async (req, res) => {
+  const { id, userId, latitude, longitude, timestamp, source } = req.body ?? {};
+
+  if (!id || !userId || latitude === undefined || longitude === undefined || !timestamp) {
+    return res.status(400).json({ error: 'Missing required fields: id, userId, latitude, longitude, timestamp' });
+  }
+
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  const ts = Number(timestamp);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(ts)) {
+    return res.status(400).json({ error: 'Invalid latitude/longitude/timestamp' });
+  }
+
+  try {
+    if (pool) {
+      const result = await pool.query(
+        `INSERT INTO sos_messages (message_id, user_id, lat, lng, ts, source)
+         VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), $6)
+         ON CONFLICT (message_id) DO UPDATE SET user_id = EXCLUDED.user_id
+         RETURNING id, message_id AS "messageId", user_id AS "userId", lat AS latitude, lng AS longitude, EXTRACT(EPOCH FROM ts) * 1000 AS timestamp, source, received_at AS "receivedAt"`,
+        [id, userId, lat, lng, ts, source || 'bluetooth-mesh']
+      );
+
+      return res.status(201).json({ success: true, record: result.rows[0] });
+    }
+
+    const existing = mockDb.sosMessages.find((m) => m.messageId === id);
+    if (!existing) {
+      mockDb.sosMessages.push({
+        id: `sos-${Date.now()}`,
+        messageId: id,
+        userId,
+        latitude: lat,
+        longitude: lng,
+        timestamp: ts,
+        source: source || 'bluetooth-mesh',
+        receivedAt: Date.now()
+      });
+    }
+
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to ingest SOS message' });
+  }
+});
+
+app.get('/api/sos/recent', async (req, res) => {
+  const rawLimit = Number(req.query.limit || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
+
+  try {
+    if (pool) {
+      const result = await pool.query(
+        `SELECT message_id AS "messageId", user_id AS "userId", lat AS latitude, lng AS longitude,
+                EXTRACT(EPOCH FROM ts) * 1000 AS timestamp, source, received_at AS "receivedAt"
+         FROM sos_messages
+         ORDER BY received_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      return res.json(result.rows);
+    }
+
+    return res.json(
+      [...mockDb.sosMessages]
+        .sort((a, b) => b.receivedAt - a.receivedAt)
+        .slice(0, limit)
+    );
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to fetch SOS messages' });
+  }
+});
+
 // --- Vite Middleware ---
 async function startServer() {
   // Initialize Database Tables if Pool exists
@@ -324,6 +411,31 @@ async function startServer() {
             code TEXT NOT NULL,
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
             verified BOOLEAN DEFAULT FALSE
+        );
+        CREATE TABLE IF NOT EXISTS reports (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID REFERENCES users(id),
+          category TEXT NOT NULL,
+          description TEXT,
+          lat DOUBLE PRECISION,
+          lng DOUBLE PRECISION,
+          media_url TEXT,
+          status TEXT DEFAULT 'PENDING',
+          ai_confidence DOUBLE PRECISION,
+          ai_reasoning TEXT,
+          priority_score DOUBLE PRECISION,
+          priority_level TEXT,
+          timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS sos_messages (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          message_id TEXT UNIQUE NOT NULL,
+          user_id TEXT NOT NULL,
+          lat DOUBLE PRECISION NOT NULL,
+          lng DOUBLE PRECISION NOT NULL,
+          ts TIMESTAMP WITH TIME ZONE NOT NULL,
+          source TEXT DEFAULT 'bluetooth-mesh',
+          received_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
       `);
       console.log("Database tables initialized.");
