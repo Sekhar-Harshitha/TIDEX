@@ -1,0 +1,9 @@
+{
+  "name": "Remix: TideX - Hazard Response",
+  "description": "TideX - Advanced Hazard Response \u0026 Monitoring System. Features live weather tracking, hazard heatmaps, and citizen reporting.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
