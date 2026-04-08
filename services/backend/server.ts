@@ -31,7 +31,6 @@ const pool = new Pool({
   ssl: useSsl ? { rejectUnauthorized: false } : undefined,
 });
 
-// Middleware
 app.use((req, _res, next) => {
   console.log(`[REQ] ${req.method} ${req.originalUrl}`);
   next();
@@ -54,7 +53,9 @@ const parseRole = (role: string | undefined): string => {
   if (!role) return "Citizen";
   const normalized = role.toLowerCase();
   if (normalized === "admin") return "Admin";
-  if (normalized === "electrical_officer") return "Electrical Officer";
+  if (normalized === "electrical officer" || normalized === "electrical_officer") {
+    return "Electrical Officer";
+  }
   return "Citizen";
 };
 
@@ -102,7 +103,6 @@ const normalizeReport = (row: any) => ({
   priorityLevel: row.priority_level,
 });
 
-// --- Auth Middleware ---
 const authenticateToken = (req: any, res: any, next: any) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -116,9 +116,16 @@ const authenticateToken = (req: any, res: any, next: any) => {
   });
 };
 
-// --- API Routes ---
+app.get("/api/health", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ status: "ok", mode: "database" });
+  } catch (err) {
+    console.error("Health check failed:", err);
+    res.status(500).json({ status: "error", mode: "database" });
+  }
+});
 
-// 1. Auth: Sign Up
 app.post("/api/auth/signup", async (req, res) => {
   const { name, email, password, phone } = req.body;
   try {
@@ -133,13 +140,13 @@ app.post("/api/auth/signup", async (req, res) => {
     res.json({ user, token });
   } catch (err: any) {
     console.error(err);
-    if (err.code === "23505")
+    if (err.code === "23505") {
       return res.status(400).json({ error: "Email already exists" });
+    }
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// 2. Auth: Login
 app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -164,7 +171,6 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// 3. Profile: Get Profile
 app.get("/api/profile", authenticateToken, async (req: any, res) => {
   try {
     const result = await pool.query(
@@ -181,7 +187,6 @@ app.get("/api/profile", authenticateToken, async (req: any, res) => {
   }
 });
 
-// 4. Profile: Update Profile
 app.put("/api/profile", authenticateToken, async (req: any, res) => {
   const { name, email, phone } = req.body;
   try {
@@ -199,7 +204,6 @@ app.put("/api/profile", authenticateToken, async (req: any, res) => {
   }
 });
 
-// 4.1 Profile: Update Role
 app.put("/api/profile/role", authenticateToken, async (req: any, res) => {
   const { role } = req.body;
   try {
@@ -217,7 +221,6 @@ app.put("/api/profile/role", authenticateToken, async (req: any, res) => {
   }
 });
 
-// 5. Profile: Upload Photo (Base64)
 app.post("/api/upload-photo", authenticateToken, async (req: any, res) => {
   const { photoBase64 } = req.body;
   try {
@@ -236,14 +239,12 @@ app.post("/api/upload-photo", authenticateToken, async (req: any, res) => {
   }
 });
 
-// 6. Profile: Change Password
 app.post("/api/change-password", authenticateToken, async (req: any, res) => {
   const { oldPassword, newPassword } = req.body;
   try {
-    const result = await pool.query(
-      "SELECT password FROM users WHERE id = $1",
-      [req.user.id],
-    );
+    const result = await pool.query("SELECT password FROM users WHERE id = $1", [
+      req.user.id,
+    ]);
     const user = result.rows[0];
 
     if (!user || !(await bcrypt.compare(oldPassword, user.password))) {
@@ -262,18 +263,17 @@ app.post("/api/change-password", authenticateToken, async (req: any, res) => {
   }
 });
 
-// 7. OTP Simulation
 app.post("/api/otp/send", authenticateToken, async (req: any, res) => {
   const { type, value } = req.body;
   const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   try {
     await pool.query(
       "INSERT INTO otp_verifications (user_id, type, value, code, expires_at) VALUES ($1, $2, $3, $4, $5)",
       [req.user.id, type, value, code, expiresAt],
     );
-    console.log(`OTP for ${type} (${value}): ${code}`); // Log for simulation
+    console.log(`OTP for ${type} (${value}): ${code}`);
     res.json({ success: true, message: `OTP sent to ${value}` });
   } catch (err) {
     console.error(err);
@@ -341,7 +341,6 @@ app.patch("/api/users/:id/strikes", authenticateToken, async (req, res) => {
   }
 });
 
-// --- Reports Logic ---
 app.get("/api/reports", authenticateToken, async (_req, res) => {
   try {
     const result = await pool.query(
@@ -379,10 +378,9 @@ app.post("/api/reports", authenticateToken, async (req: any, res) => {
     );
 
     const reportRow = result.rows[0];
-    const userResult = await pool.query(
-      "SELECT name FROM users WHERE id = $1",
-      [req.user.id],
-    );
+    const userResult = await pool.query("SELECT name FROM users WHERE id = $1", [
+      req.user.id,
+    ]);
     reportRow.user_name = userResult.rows[0]?.name || "Unknown User";
 
     res.status(201).json(normalizeReport(reportRow));
@@ -392,13 +390,58 @@ app.post("/api/reports", authenticateToken, async (req: any, res) => {
   }
 });
 
-app.get("/api/health", async (_req, res) => {
+app.post("/api/sos", async (req, res) => {
+  const { id, userId, latitude, longitude, timestamp, source } = req.body ?? {};
+
+  if (!id || !userId || latitude === undefined || longitude === undefined || !timestamp) {
+    return res.status(400).json({
+      error: "Missing required fields: id, userId, latitude, longitude, timestamp",
+    });
+  }
+
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  const ts = Number(timestamp);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(ts)) {
+    return res.status(400).json({ error: "Invalid latitude/longitude/timestamp" });
+  }
+
   try {
-    await pool.query("SELECT 1");
-    res.json({ status: "ok", mode: "database" });
+    const result = await pool.query(
+      `INSERT INTO sos_messages (message_id, user_id, lat, lng, ts, source)
+       VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), $6)
+       ON CONFLICT (message_id) DO UPDATE SET user_id = EXCLUDED.user_id
+       RETURNING id, message_id AS "messageId", user_id AS "userId", lat AS latitude, lng AS longitude, EXTRACT(EPOCH FROM ts) * 1000 AS timestamp, source, received_at AS "receivedAt"`,
+      [id, userId, lat, lng, ts, source || "bluetooth-mesh"],
+    );
+
+    return res.status(201).json({ success: true, record: result.rows[0] });
   } catch (err) {
-    console.error("Health check failed:", err);
-    res.status(500).json({ status: "error", mode: "database" });
+    console.error(err);
+    return res.status(500).json({ error: "Failed to ingest SOS message" });
+  }
+});
+
+app.get("/api/sos/recent", async (req: any, res) => {
+  const rawLimit = Number(req.query.limit || 20);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), 100)
+    : 20;
+
+  try {
+    const result = await pool.query(
+      `SELECT message_id AS "messageId", user_id AS "userId", lat AS latitude, lng AS longitude,
+              EXTRACT(EPOCH FROM ts) * 1000 AS timestamp, source, received_at AS "receivedAt"
+       FROM sos_messages
+       ORDER BY received_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Failed to fetch SOS messages" });
   }
 });
 
@@ -451,6 +494,17 @@ async function startServer() {
         code TEXT NOT NULL,
         expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
         verified BOOLEAN DEFAULT FALSE
+      );
+
+      CREATE TABLE IF NOT EXISTS sos_messages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        message_id TEXT UNIQUE NOT NULL,
+        user_id TEXT NOT NULL,
+        lat DOUBLE PRECISION NOT NULL,
+        lng DOUBLE PRECISION NOT NULL,
+        ts TIMESTAMP WITH TIME ZONE NOT NULL,
+        source TEXT DEFAULT 'bluetooth-mesh',
+        received_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
     console.log("Database verified and tables initialized.");
