@@ -53,7 +53,10 @@ const parseRole = (role: string | undefined): string => {
   if (!role) return "Citizen";
   const normalized = role.toLowerCase();
   if (normalized === "admin") return "Admin";
-  if (normalized === "electrical officer" || normalized === "electrical_officer") {
+  if (
+    normalized === "electrical officer" ||
+    normalized === "electrical_officer"
+  ) {
     return "Electrical Officer";
   }
   return "Citizen";
@@ -242,9 +245,10 @@ app.post("/api/upload-photo", authenticateToken, async (req: any, res) => {
 app.post("/api/change-password", authenticateToken, async (req: any, res) => {
   const { oldPassword, newPassword } = req.body;
   try {
-    const result = await pool.query("SELECT password FROM users WHERE id = $1", [
-      req.user.id,
-    ]);
+    const result = await pool.query(
+      "SELECT password FROM users WHERE id = $1",
+      [req.user.id],
+    );
     const user = result.rows[0];
 
     if (!user || !(await bcrypt.compare(oldPassword, user.password))) {
@@ -378,9 +382,10 @@ app.post("/api/reports", authenticateToken, async (req: any, res) => {
     );
 
     const reportRow = result.rows[0];
-    const userResult = await pool.query("SELECT name FROM users WHERE id = $1", [
-      req.user.id,
-    ]);
+    const userResult = await pool.query(
+      "SELECT name FROM users WHERE id = $1",
+      [req.user.id],
+    );
     reportRow.user_name = userResult.rows[0]?.name || "Unknown User";
 
     res.status(201).json(normalizeReport(reportRow));
@@ -393,9 +398,16 @@ app.post("/api/reports", authenticateToken, async (req: any, res) => {
 app.post("/api/sos", async (req, res) => {
   const { id, userId, latitude, longitude, timestamp, source } = req.body ?? {};
 
-  if (!id || !userId || latitude === undefined || longitude === undefined || !timestamp) {
+  if (
+    !id ||
+    !userId ||
+    latitude === undefined ||
+    longitude === undefined ||
+    !timestamp
+  ) {
     return res.status(400).json({
-      error: "Missing required fields: id, userId, latitude, longitude, timestamp",
+      error:
+        "Missing required fields: id, userId, latitude, longitude, timestamp",
     });
   }
 
@@ -404,7 +416,9 @@ app.post("/api/sos", async (req, res) => {
   const ts = Number(timestamp);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(ts)) {
-    return res.status(400).json({ error: "Invalid latitude/longitude/timestamp" });
+    return res
+      .status(400)
+      .json({ error: "Invalid latitude/longitude/timestamp" });
   }
 
   try {
