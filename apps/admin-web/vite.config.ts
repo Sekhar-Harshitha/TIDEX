@@ -4,9 +4,11 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
+  const webPort = Number(env.VITE_WEB_PORT || 5173);
   return {
     server: {
-      port: 3000,
+      port: Number.isFinite(webPort) ? webPort : 5173,
+      strictPort: true,
       host: "0.0.0.0",
       proxy: {
         "/api": {

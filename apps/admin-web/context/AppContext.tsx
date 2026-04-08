@@ -25,7 +25,7 @@ import {
 } from "../types";
 import { translations } from "./translations";
 import { MeshService } from "../services/meshNetwork";
-import { apiUrl } from "../services/api";
+import { apiRequest } from "../services/api";
 
 interface AppContextType {
   reports: Report[];
@@ -106,64 +106,6 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
-
-// Seed Data
-const SEED_USERS: User[] = [
-  {
-    id: "u1",
-    name: "Admin Officer",
-    email: "admin@tidex.com",
-    phone: "0000",
-    strikes: 0,
-    role: UserRole.ADMIN,
-    isBanned: false,
-  },
-  {
-    id: "u2",
-    name: "Ravi Kumar",
-    email: "ravi@gmail.com",
-    phone: "9876543210",
-    strikes: 0,
-    role: UserRole.CITIZEN,
-    isBanned: false,
-  },
-  {
-    id: "u3",
-    name: "Priya Sharma",
-    email: "priya@gmail.com",
-    phone: "9988776655",
-    strikes: 2,
-    role: UserRole.CITIZEN,
-    isBanned: false,
-  },
-];
-
-const SEED_REPORTS: Report[] = [
-  {
-    id: "r1",
-    userId: "u2",
-    userName: "Ravi Kumar",
-    category: HazardCategory.ELECTRICAL,
-    description: "Transformer on North St sparking heavily. Oil leaking.",
-    location: { latitude: 13.0475, longitude: 80.2824 },
-    timestamp: Date.now() - 3600000,
-    status: ReportStatus.VERIFIED,
-    aiReasoning: "Consistent with transformer failure description.",
-    mediaUrl: "https://picsum.photos/400/300?random=1",
-  },
-  {
-    id: "r2",
-    userId: "u3",
-    userName: "Priya Sharma",
-    category: HazardCategory.TSUNAMI,
-    description: "Water receding rapidly! Possible tsunami!",
-    location: { latitude: 11.9416, longitude: 79.8083 },
-    timestamp: Date.now() - 1800000,
-    status: ReportStatus.PENDING,
-    mediaUrl: "https://picsum.photos/400/300?random=2",
-    isSOS: true,
-  },
-];
 
 const SEED_ZONES: ElectricalZone[] = [
   {
@@ -265,15 +207,8 @@ const SEED_SAFE_ZONES: SafeZone[] = [
 export const AppProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  const [reports, setReports] = useState<Report[]>(() => {
-    const saved = localStorage.getItem("tidex_reports");
-    return saved ? JSON.parse(saved) : SEED_REPORTS;
-  });
-
-  const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem("tidex_users");
-    return saved ? JSON.parse(saved) : SEED_USERS;
-  });
+  const [reports, setReports] = useState<Report[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = localStorage.getItem("tidex_messages");
@@ -321,12 +256,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
   );
 
   // Persistence Effects
-  useEffect(() => {
-    localStorage.setItem("tidex_reports", JSON.stringify(reports));
-  }, [reports]);
-  useEffect(() => {
-    localStorage.setItem("tidex_users", JSON.stringify(users));
-  }, [users]);
   useEffect(() => {
     localStorage.setItem("tidex_messages", JSON.stringify(messages));
   }, [messages]);
@@ -388,20 +317,159 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     return translations[language][key] || key;
   };
 
+  const normalizeRole = (role: string | undefined): UserRole => {
+    const normalized = (role || "").toLowerCase();
+    if (normalized === "admin") return UserRole.ADMIN;
+    if (
+      normalized === "electrical officer" ||
+      normalized === "electrical_officer"
+    ) {
+      return UserRole.ELECTRICAL_OFFICER;
+    }
+    return UserRole.CITIZEN;
+  };
+
+  const normalizeReportStatus = (status: string | undefined): ReportStatus => {
+    const normalized = (status || "").toLowerCase();
+    if (normalized === "verified") return ReportStatus.VERIFIED;
+    if (normalized === "suspicious") return ReportStatus.SUSPICIOUS;
+    if (normalized === "fake") return ReportStatus.FAKE;
+    if (normalized === "action taken" || normalized === "action_taken") {
+      return ReportStatus.ACTION_TAKEN;
+    }
+    return ReportStatus.PENDING;
+  };
+
+  const mapUserFromApi = (user: any): User => ({
+    id: String(user.id),
+    name: String(user.name || "Unknown"),
+    email: String(user.email || ""),
+    phone: user.phone || "",
+    strikes: Number(user.strikes || 0),
+    role: normalizeRole(user.role),
+    isBanned: Boolean(user.isBanned || Number(user.strikes || 0) >= 3),
+    profile_image_url: user.profile_image_url || undefined,
+    created_at: user.created_at
+      ? new Date(user.created_at).getTime()
+      : undefined,
+    last_login: user.last_login
+      ? new Date(user.last_login).getTime()
+      : undefined,
+  });
+
+  const mapReportFromApi = (report: any): Report => ({
+    id: String(report.id),
+    userId: String(report.userId || report.user_id || ""),
+    userName: String(report.userName || report.user_name || "Unknown User"),
+    category: (report.category as HazardCategory) || HazardCategory.OTHER,
+    description: String(report.description || ""),
+    location: {
+      latitude: Number(report.location?.latitude ?? report.lat ?? 0),
+      longitude: Number(report.location?.longitude ?? report.lng ?? 0),
+    },
+    timestamp: report.timestamp
+      ? Number.isFinite(report.timestamp)
+        ? Number(report.timestamp)
+        : new Date(report.timestamp).getTime()
+      : Date.now(),
+    mediaUrl: report.mediaUrl || report.media_url || undefined,
+    status: normalizeReportStatus(report.status),
+    aiConfidence: report.aiConfidence ?? report.ai_confidence,
+    aiReasoning: report.aiReasoning ?? report.ai_reasoning,
+    priorityScore: report.priorityScore ?? report.priority_score,
+    priorityLevel: report.priorityLevel ?? report.priority_level,
+    isSOS: Boolean(report.isSOS),
+    isOfflineSubmission: Boolean(report.isOfflineSubmission),
+  });
+
+  const getAuthHeaders = (
+    authToken: string | null,
+  ): Record<string, string> => ({
+    "Content-Type": "application/json",
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+  });
+
+  const loadSessionData = async (authToken: string) => {
+    const headers = getAuthHeaders(authToken);
+    const [profile, usersData, reportsData] = await Promise.all([
+      apiRequest<any>("/api/profile", { headers }),
+      apiRequest<any[]>("/api/users", { headers }),
+      apiRequest<any[]>("/api/reports", { headers }),
+    ]);
+
+    setCurrentUser(mapUserFromApi(profile));
+    setUsers((usersData || []).map(mapUserFromApi));
+    setReports((reportsData || []).map(mapReportFromApi));
+  };
+
+  useEffect(() => {
+    if (!token) return;
+
+    loadSessionData(token).catch((err) => {
+      console.error("Failed to load session data:", err);
+      setLatestNotification({
+        id: `session-load-failure-${Date.now()}`,
+        title: "Backend Connection Error",
+        message: err?.message || "Could not load data from backend",
+        timestamp: Date.now(),
+      });
+    });
+  }, [token]);
+
   const toggleNetworkStatus = () => {
     setIsOnline((prev) => {
       const newState = !prev;
       if (newState && offlineQueue.length > 0) {
-        setTimeout(() => {
-          setReports((currentReports) => [...offlineQueue, ...currentReports]);
-          setOfflineQueue([]);
-          setLatestNotification({
-            id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            title: "Sync Complete",
-            message: `${offlineQueue.length} offline reports have been uploaded successfully.`,
-            timestamp: Date.now(),
-          });
-        }, 1500);
+        const pendingReports = [...offlineQueue];
+
+        (async () => {
+          if (!token) {
+            setLatestNotification({
+              id: `sync-failed-${Date.now()}`,
+              title: "Sync Failed",
+              message: "Cannot sync offline queue without authentication.",
+              timestamp: Date.now(),
+            });
+            return;
+          }
+
+          try {
+            const synced: Report[] = [];
+
+            for (const report of pendingReports) {
+              const created = await apiRequest<any>("/api/reports", {
+                method: "POST",
+                headers: getAuthHeaders(token),
+                body: JSON.stringify({
+                  category: report.category,
+                  description: report.description,
+                  location: report.location,
+                  mediaUrl: report.mediaUrl,
+                  status: report.status,
+                  aiReasoning: report.aiReasoning,
+                }),
+              });
+              synced.push(mapReportFromApi(created));
+            }
+
+            setReports((currentReports) => [...synced, ...currentReports]);
+            setOfflineQueue([]);
+            setLatestNotification({
+              id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+              title: "Sync Complete",
+              message: `${pendingReports.length} offline reports uploaded successfully.`,
+              timestamp: Date.now(),
+            });
+          } catch (error: any) {
+            console.error("Offline queue sync failed:", error);
+            setLatestNotification({
+              id: `sync-failed-${Date.now()}`,
+              title: "Sync Failed",
+              message: error?.message || "Failed to upload offline reports",
+              timestamp: Date.now(),
+            });
+          }
+        })();
       }
       return newState;
     });
@@ -540,15 +608,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   const login = async (email: string, password: string) => {
     try {
-      const res = await fetch(apiUrl("/api/auth/login"), {
+      const data = await apiRequest<any>("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Login failed");
-      setCurrentUser(data.user);
+
+      const normalizedUser = mapUserFromApi(data.user);
+      setCurrentUser(normalizedUser);
       setToken(data.token);
+      await loadSessionData(data.token);
     } catch (err) {
       console.error(err);
       throw err;
@@ -562,15 +631,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     phone: string,
   ) => {
     try {
-      const res = await fetch(apiUrl("/api/auth/signup"), {
+      const data = await apiRequest<any>("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password, phone }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Signup failed");
-      setCurrentUser(data.user);
+
+      const normalizedUser = mapUserFromApi(data.user);
+      setCurrentUser(normalizedUser);
       setToken(data.token);
+      await loadSessionData(data.token);
     } catch (err) {
       console.error(err);
       throw err;
@@ -588,17 +658,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     phone: string;
   }) => {
     try {
-      const res = await fetch(apiUrl("/api/profile"), {
+      const updatedUser = await apiRequest<any>("/api/profile", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getAuthHeaders(token),
         body: JSON.stringify(data),
       });
-      const updatedUser = await res.json();
-      if (!res.ok) throw new Error(updatedUser.error || "Update failed");
-      setCurrentUser((prev) => (prev ? { ...prev, ...updatedUser } : null));
+      setCurrentUser(mapUserFromApi(updatedUser));
     } catch (err) {
       console.error(err);
       throw err;
@@ -607,16 +672,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   const uploadPhoto = async (photoBase64: string) => {
     try {
-      const res = await fetch(apiUrl("/api/upload-photo"), {
+      const data = await apiRequest<any>("/api/upload-photo", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getAuthHeaders(token),
         body: JSON.stringify({ photoBase64 }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
       setCurrentUser((prev) =>
         prev ? { ...prev, profile_image_url: data.profile_image_url } : null,
       );
@@ -628,16 +688,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   const changePassword = async (oldPassword: string, newPassword: string) => {
     try {
-      const res = await fetch(apiUrl("/api/change-password"), {
+      await apiRequest<any>("/api/change-password", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getAuthHeaders(token),
         body: JSON.stringify({ oldPassword, newPassword }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Password change failed");
     } catch (err) {
       console.error(err);
       throw err;
@@ -646,16 +701,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   const sendOtp = async (type: "email" | "phone", value: string) => {
     try {
-      const res = await fetch(apiUrl("/api/otp/send"), {
+      await apiRequest<any>("/api/otp/send", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getAuthHeaders(token),
         body: JSON.stringify({ type, value }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "OTP send failed");
     } catch (err) {
       console.error(err);
       throw err;
@@ -668,16 +718,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     code: string,
   ) => {
     try {
-      const res = await fetch(apiUrl("/api/otp/verify"), {
+      await apiRequest<any>("/api/otp/verify", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: getAuthHeaders(token),
         body: JSON.stringify({ type, value, code }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "OTP verification failed");
 
       // If verified, update the actual profile field
       if (!currentUser) return;
@@ -702,7 +747,45 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   const addReport = (report: Report) => {
     if (isOnline) {
-      setReports((prev) => [report, ...prev]);
+      if (!token) {
+        setLatestNotification({
+          id: `report-auth-${Date.now()}`,
+          title: "Authentication Required",
+          message: "Please login again before submitting reports.",
+          timestamp: Date.now(),
+        });
+        return;
+      }
+
+      (async () => {
+        try {
+          const created = await apiRequest<any>("/api/reports", {
+            method: "POST",
+            headers: getAuthHeaders(token),
+            body: JSON.stringify({
+              category: report.category,
+              description: report.description,
+              location: report.location,
+              mediaUrl: report.mediaUrl,
+              status: report.status,
+              aiReasoning: report.aiReasoning,
+            }),
+          });
+          setReports((prev) => [mapReportFromApi(created), ...prev]);
+        } catch (error: any) {
+          console.error("Failed to submit report:", error);
+          const offlineReport = { ...report, isOfflineSubmission: true };
+          setOfflineQueue((prev) => [offlineReport, ...prev]);
+          setLatestNotification({
+            id: `report-failed-${Date.now()}`,
+            title: "Submission Failed",
+            message:
+              error?.message ||
+              "Report queued offline and will retry on reconnect.",
+            timestamp: Date.now(),
+          });
+        }
+      })();
     } else {
       const offlineReport = { ...report, isOfflineSubmission: true };
       setOfflineQueue((prev) => [offlineReport, ...prev]);
@@ -878,42 +961,42 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const incrementStrikes = (userId: string) => {
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          const newStrikes = u.strikes + 1;
+    if (!token) return;
 
-          if (newStrikes === 2) {
-            setLatestNotification({
-              id: `warn-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-              title: "Warning Issued",
-              message:
-                "You have submitted 2 fake reports. One more and your account will be banned.",
-              timestamp: Date.now(),
-              targetPhoneNumber: u.phone,
-            });
-          }
+    apiRequest<any>(`/api/users/${userId}/strikes`, {
+      method: "PATCH",
+      headers: getAuthHeaders(token),
+      body: JSON.stringify({ delta: 1 }),
+    })
+      .then((updatedUser) => {
+        const normalized = mapUserFromApi(updatedUser);
+        setUsers((prev) => prev.map((u) => (u.id === userId ? normalized : u)));
 
-          if (newStrikes >= 3) {
-            setLatestNotification({
-              id: `ban-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-              title: "Account Suspended",
-              message:
-                "Your account has been banned due to repeated fake reporting.",
-              timestamp: Date.now(),
-              targetPhoneNumber: u.phone,
-            });
-          }
-
-          return {
-            ...u,
-            strikes: newStrikes,
-            isBanned: newStrikes >= 3,
-          };
+        if (normalized.strikes === 2) {
+          setLatestNotification({
+            id: `warn-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            title: "Warning Issued",
+            message:
+              "You have submitted 2 fake reports. One more and your account will be banned.",
+            timestamp: Date.now(),
+            targetPhoneNumber: normalized.phone,
+          });
         }
-        return u;
-      }),
-    );
+
+        if (normalized.strikes >= 3) {
+          setLatestNotification({
+            id: `ban-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            title: "Account Suspended",
+            message:
+              "Your account has been banned due to repeated fake reporting.",
+            timestamp: Date.now(),
+            targetPhoneNumber: normalized.phone,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to increment strikes:", error);
+      });
   };
 
   const switchUserRole = async (targetRole?: UserRole) => {
@@ -923,24 +1006,40 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
       targetRole ||
       (currentUser.role === UserRole.ADMIN ? UserRole.CITIZEN : UserRole.ADMIN);
 
-    // Update locally first for immediate feedback
-    const updatedUser = { ...currentUser, role: newRole };
-    setCurrentUser(updatedUser);
+    if (!token) {
+      setLatestNotification({
+        id: `role-switch-failed-${Date.now()}`,
+        title: "Role Switch Failed",
+        message: "You are not authenticated.",
+        timestamp: Date.now(),
+      });
+      return;
+    }
 
-    // Try to update on server if possible
-    if (token) {
-      try {
-        await fetch(apiUrl("/api/profile/role"), {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ role: newRole }),
-        });
-      } catch (err) {
-        console.error("Failed to update role on server:", err);
-      }
+    const previousUser = currentUser;
+    setCurrentUser({ ...currentUser, role: newRole });
+
+    try {
+      const updated = await apiRequest<any>("/api/profile/role", {
+        method: "PUT",
+        headers: getAuthHeaders(token),
+        body: JSON.stringify({ role: newRole }),
+      });
+      const normalized = mapUserFromApi(updated);
+      setCurrentUser(normalized);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === normalized.id ? normalized : u)),
+      );
+    } catch (err: any) {
+      console.error("Failed to update role on server:", err);
+      setCurrentUser(previousUser);
+      setLatestNotification({
+        id: `role-switch-failed-${Date.now()}`,
+        title: "Role Switch Failed",
+        message: err?.message || "Backend rejected role switch",
+        timestamp: Date.now(),
+      });
+      return;
     }
 
     setLatestNotification({

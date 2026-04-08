@@ -3,12 +3,16 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "db:init:local": "powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1 init",
+    "db:start:local": "powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1 start",
+    "db:stop:local": "powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1 stop",
+    "db:status:local": "powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1 status",
     "dev:web": "npm --prefix apps/admin-web run dev",
     "dev:backend": "npm --prefix services/backend run dev",
-    "dev:mobile": "npm --prefix apps/student-mobile run start",
+    "dev:mobile": "npm --prefix apps/mobile run start",
     "build:web": "npm --prefix apps/admin-web run build",
     "lint:web": "npm --prefix apps/admin-web run lint",
     "lint:backend": "npm --prefix services/backend run lint",
-    "install:all": "npm --prefix apps/admin-web install && npm --prefix services/backend install && npm --prefix apps/student-mobile install"
+    "install:all": "npm --prefix apps/admin-web install && npm --prefix services/backend install && npm --prefix apps/mobile install"
   }
 }
